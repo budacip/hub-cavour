@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hub_cavour.domain.errors import InvalidItemPrice, ModifierNotAllowed, ProductNotFound
+from hub_cavour.domain.errors import (
+    InvalidItemPrice,
+    InvalidModifierQuantity,
+    ModifierNotAllowed,
+    ProductNotFound,
+)
 from hub_cavour.domain.money import Money
 
 
@@ -35,11 +40,28 @@ class CatalogProduct:
     def resolve_modifiers(
         self, modifier_ids: tuple[str, ...]
     ) -> tuple[CatalogModifier, ...]:
+        resolved = self.resolve_modifier_quantities(
+            tuple((modifier_id, 1) for modifier_id in modifier_ids)
+        )
+        return tuple(modifier for modifier, _quantity in resolved)
+
+    def resolve_modifier_quantities(
+        self, selections: tuple[tuple[str, int], ...]
+    ) -> tuple[tuple[CatalogModifier, int], ...]:
+        modifier_ids = [modifier_id for modifier_id, _quantity in selections]
         if len(modifier_ids) != len(set(modifier_ids)):
             raise ModifierNotAllowed("The same modifier cannot be selected twice")
+        for modifier_id, quantity in selections:
+            if type(quantity) is not int or quantity <= 0:
+                raise InvalidModifierQuantity(
+                    f"Modifier {modifier_id!r} quantity must be a positive integer"
+                )
         available = {modifier.id: modifier for modifier in self.modifiers}
         try:
-            return tuple(available[modifier_id] for modifier_id in modifier_ids)
+            return tuple(
+                (available[modifier_id], quantity)
+                for modifier_id, quantity in selections
+            )
         except KeyError as error:
             raise ModifierNotAllowed(
                 f"Modifier {error.args[0]!r} is not allowed for product {self.id!r}"

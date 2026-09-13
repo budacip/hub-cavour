@@ -8,6 +8,8 @@ from enum import StrEnum
 from hub_cavour.domain.errors import (
     EmptyOrder,
     InvalidItemPrice,
+    InvalidModifierQuantity,
+    InvalidNote,
     InvalidOrderTransition,
     InvalidQuantity,
     ItemNotFound,
@@ -25,6 +27,13 @@ class ModifierSnapshot:
     modifier_id: str
     name: str
     price_delta: Money
+    quantity: int = 1
+
+    def __post_init__(self) -> None:
+        if type(self.quantity) is not int or self.quantity <= 0:
+            raise InvalidModifierQuantity(
+                "Modifier quantity must be a positive integer"
+            )
 
 
 @dataclass(slots=True)
@@ -35,9 +44,11 @@ class OrderItem:
     base_unit_price: Money
     quantity: int
     modifiers: tuple[ModifierSnapshot, ...] = ()
+    note: str = ""
 
     def __post_init__(self) -> None:
         self.set_quantity(self.quantity)
+        self.set_note(self.note)
         if self.unit_price.cents < 0:
             raise InvalidItemPrice("An order item unit price cannot be negative")
 
@@ -45,7 +56,7 @@ class OrderItem:
     def unit_price(self) -> Money:
         result = self.base_unit_price
         for modifier in self.modifiers:
-            result = result + modifier.price_delta
+            result = result + (modifier.price_delta * modifier.quantity)
         return result
 
     @property
@@ -56,6 +67,11 @@ class OrderItem:
         if type(quantity) is not int or quantity <= 0:
             raise InvalidQuantity("Item quantity must be a positive integer")
         self.quantity = quantity
+
+    def set_note(self, note: str) -> None:
+        if not isinstance(note, str):
+            raise InvalidNote("Item note must be a string")
+        self.note = note
 
 
 @dataclass(slots=True)
@@ -86,11 +102,16 @@ class Order:
 
     def change_quantity(self, item_id: str, quantity: int) -> None:
         self._require_draft("change quantities")
-        for item in self.items:
-            if item.id == item_id:
-                item.set_quantity(quantity)
-                return
-        raise ItemNotFound(f"Item {item_id!r} was not found in order {self.id!r}")
+        self._find_item(item_id).set_quantity(quantity)
+
+    def remove_item(self, item_id: str) -> None:
+        self._require_draft("remove items")
+        item = self._find_item(item_id)
+        self.items.remove(item)
+
+    def set_item_note(self, item_id: str, note: str) -> None:
+        self._require_draft("change item notes")
+        self._find_item(item_id).set_note(note)
 
     def confirm(self) -> None:
         self._require_draft("confirm the order")
@@ -103,3 +124,9 @@ class Order:
             raise InvalidOrderTransition(
                 f"Cannot {action} while order status is {self.status.value!r}"
             )
+
+    def _find_item(self, item_id: str) -> OrderItem:
+        for item in self.items:
+            if item.id == item_id:
+                return item
+        raise ItemNotFound(f"Item {item_id!r} was not found in order {self.id!r}")

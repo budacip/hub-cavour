@@ -7,20 +7,26 @@ from hub_cavour.application.commands import (
     ChangeQuantity,
     ConfirmOrder,
     CreateOrder,
+    ModifierSelection,
+    RemoveItem,
+    SetItemNote,
 )
 from hub_cavour.application.order_engine import OrderEngine
 from hub_cavour.domain.catalog import CatalogModifier, CatalogProduct, InMemoryCatalog
 from hub_cavour.domain.errors import (
     EmptyOrder,
     IdempotencyConflict,
+    InvalidModifierQuantity,
     InvalidMoney,
+    InvalidNote,
     InvalidOrderTransition,
     InvalidQuantity,
+    ItemNotFound,
     ModifierNotAllowed,
     VersionConflict,
 )
 from hub_cavour.domain.money import Money
-from hub_cavour.domain.orders import OrderStatus
+from hub_cavour.domain.orders import ModifierSnapshot, OrderStatus
 from hub_cavour.infrastructure.in_memory_repository import InMemoryOrderRepository
 
 
@@ -51,17 +57,20 @@ class OrderEngineTests(unittest.TestCase):
         command_id: str = "cmd-add",
         expected_version: int = 0,
         quantity: int = 1,
+        item_id: str = "item-1",
         modifier_ids: tuple[str, ...] = (),
+        modifier_selections: tuple[ModifierSelection, ...] = (),
     ):
         return self.engine.add_item(
             AddItem(
                 command_id=command_id,
                 order_id="order-1",
                 expected_version=expected_version,
-                item_id="item-1",
+                item_id=item_id,
                 product_id="coppa-cavour",
                 quantity=quantity,
                 modifier_ids=modifier_ids,
+                modifier_selections=modifier_selections,
             )
         )
 
@@ -187,6 +196,176 @@ class OrderEngineTests(unittest.TestCase):
             self.engine.change_quantity(
                 ChangeQuantity("same-command", "order-1", 1, "item-1", 2)
             )
+
+    def test_modifier_quantities_are_priced_and_snapshotted(self) -> None:
+        self.create_order()
+        order = self.add_coppa(
+            quantity=2,
+            modifier_selections=(ModifierSelection("panna", 3),),
+        )
+
+        self.assertEqual(Money(1780), order.total)
+        self.assertEqual(3, order.items[0].modifiers[0].quantity)
+        self.assertEqual(Money(890), order.items[0].unit_price)
+
+    def test_invalid_modifier_quantity_is_rejected_without_saving(self) -> None:
+        self.create_order()
+        with self.assertRaises(InvalidModifierQuantity):
+            self.add_coppa(
+                modifier_selections=(ModifierSelection("panna", 0),),
+            )
+        self.assertEqual(0, self.engine.get_order("order-1").version)
+
+    def test_modifier_snapshot_rejects_invalid_quantity(self) -> None:
+        with self.assertRaises(InvalidModifierQuantity):
+            ModifierSnapshot("panna", "Panna montata", Money(80), 0)
+
+    def test_legacy_and_quantity_modifier_inputs_cannot_be_mixed(self) -> None:
+        self.create_order()
+        with self.assertRaises(ModifierNotAllowed):
+            self.add_coppa(
+                modifier_ids=("panna",),
+                modifier_selections=(ModifierSelection("panna", 2),),
+            )
+        self.assertEqual(0, self.engine.get_order("order-1").version)
+
+    def test_remove_item_updates_total_and_version(self) -> None:
+        self.create_order()
+        self.add_coppa(quantity=2)
+        self.add_coppa(
+            command_id="cmd-add-second",
+            expected_version=1,
+            item_id="item-2",
+        )
+
+        order = self.engine.remove_item(
+            RemoveItem("cmd-remove", "order-1", 2, "item-1")
+        )
+
+        self.assertEqual(3, order.version)
+        self.assertEqual(["item-2"], [item.id for item in order.items])
+        self.assertEqual(Money(650), order.total)
+
+    def test_item_note_can_be_added_and_modified(self) -> None:
+        self.create_order()
+        self.add_coppa()
+
+        added = self.engine.set_item_note(
+            SetItemNote("cmd-note-add", "order-1", 1, "item-1", "Poco zucchero")
+        )
+        modified = self.engine.set_item_note(
+            SetItemNote("cmd-note-edit", "order-1", 2, "item-1", "Senza zucchero")
+        )
+
+        self.assertEqual("Poco zucchero", added.items[0].note)
+        self.assertEqual("Senza zucchero", modified.items[0].note)
+        self.assertEqual(3, modified.version)
+
+    def test_invalid_note_is_rejected_without_saving(self) -> None:
+        self.create_order()
+        self.add_coppa()
+        with self.assertRaises(InvalidNote):
+            self.engine.set_item_note(
+                SetItemNote(
+                    "cmd-bad-note",
+                    "order-1",
+                    1,
+                    "item-1",
+                    42,  # type: ignore[arg-type]
+                )
+            )
+        self.assertEqual(1, self.engine.get_order("order-1").version)
+
+    def test_multiple_successive_operations_on_same_draft(self) -> None:
+        self.create_order()
+        self.add_coppa()
+        self.add_coppa(
+            command_id="cmd-add-second",
+            expected_version=1,
+            item_id="item-2",
+        )
+        self.engine.set_item_note(
+            SetItemNote("cmd-note", "order-1", 2, "item-1", "Al tavolo")
+        )
+        self.engine.change_quantity(
+            ChangeQuantity("cmd-quantity", "order-1", 3, "item-2", 2)
+        )
+        order = self.engine.remove_item(
+            RemoveItem("cmd-remove", "order-1", 4, "item-1")
+        )
+
+        self.assertEqual(OrderStatus.DRAFT, order.status)
+        self.assertEqual(5, order.version)
+        self.assertEqual(2, order.items[0].quantity)
+        self.assertEqual(Money(1300), order.total)
+
+    def test_remove_and_note_are_invalid_after_confirmation(self) -> None:
+        self.create_order()
+        self.add_coppa()
+        self.engine.confirm_order(ConfirmOrder("cmd-confirm", "order-1", 1))
+
+        with self.assertRaises(InvalidOrderTransition):
+            self.engine.remove_item(
+                RemoveItem("cmd-late-remove", "order-1", 2, "item-1")
+            )
+        with self.assertRaises(InvalidOrderTransition):
+            self.engine.set_item_note(
+                SetItemNote("cmd-late-note", "order-1", 2, "item-1", "Nota")
+            )
+
+    def test_remove_and_note_require_existing_item(self) -> None:
+        self.create_order()
+        with self.assertRaises(ItemNotFound):
+            self.engine.remove_item(
+                RemoveItem("cmd-missing-remove", "order-1", 0, "missing")
+            )
+        with self.assertRaises(ItemNotFound):
+            self.engine.set_item_note(
+                SetItemNote("cmd-missing-note", "order-1", 0, "missing", "Nota")
+            )
+
+    def test_new_commands_honor_expected_version(self) -> None:
+        self.create_order()
+        self.add_coppa()
+        with self.assertRaises(VersionConflict):
+            self.engine.remove_item(
+                RemoveItem("cmd-stale-remove", "order-1", 0, "item-1")
+            )
+        with self.assertRaises(VersionConflict):
+            self.engine.set_item_note(
+                SetItemNote("cmd-stale-note", "order-1", 0, "item-1", "Nota")
+            )
+
+    def test_remove_item_retry_is_idempotent(self) -> None:
+        self.create_order()
+        self.add_coppa()
+        self.add_coppa(
+            command_id="cmd-add-second",
+            expected_version=1,
+            item_id="item-2",
+        )
+        command = RemoveItem("cmd-remove-once", "order-1", 2, "item-2")
+
+        first = self.engine.remove_item(command)
+        retry = self.engine.remove_item(command)
+
+        self.assertEqual(first, retry)
+        self.assertEqual(3, self.engine.get_order("order-1").version)
+        self.assertEqual(["item-1"], [item.id for item in retry.items])
+
+    def test_set_item_note_retry_is_idempotent(self) -> None:
+        self.create_order()
+        self.add_coppa()
+        command = SetItemNote(
+            "cmd-note-once", "order-1", 1, "item-1", "Senza panna"
+        )
+
+        first = self.engine.set_item_note(command)
+        retry = self.engine.set_item_note(command)
+
+        self.assertEqual(first, retry)
+        self.assertEqual(2, self.engine.get_order("order-1").version)
+        self.assertEqual("Senza panna", retry.items[0].note)
 
 
 if __name__ == "__main__":

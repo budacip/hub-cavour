@@ -13,6 +13,14 @@ class InvalidQuantity(OrderEngineError):
     pass
 
 
+class InvalidModifierQuantity(OrderEngineError):
+    pass
+
+
+class InvalidNote(OrderEngineError):
+    pass
+
+
 class InvalidOrderTransition(OrderEngineError):
     pass
 
