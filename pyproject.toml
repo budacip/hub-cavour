@@ -1,0 +1,6 @@
+[project]
+name = "hub-cavour-order-engine"
+version = "0.1.0"
+description = "Core domain for the Hub Cavour Order Engine"
+requires-python = ">=3.11"
+dependencies = []
