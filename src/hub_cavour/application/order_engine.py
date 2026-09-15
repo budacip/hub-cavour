@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict
-from hashlib import sha256
-import json
 
 from hub_cavour.application.commands import (
     AddItem,
@@ -15,6 +12,7 @@ from hub_cavour.application.commands import (
     RemoveItem,
     SetItemNote,
 )
+from hub_cavour.application.idempotency import command_fingerprint
 from hub_cavour.domain.catalog import InMemoryCatalog
 from hub_cavour.domain.errors import ModifierNotAllowed
 from hub_cavour.domain.orders import ModifierSnapshot, Order, OrderItem
@@ -118,14 +116,5 @@ class OrderEngine:
 
     def _execute(self, command: object, operation: Callable[[], Order]) -> Order:
         command_id = getattr(command, "command_id")
-        fingerprint = _fingerprint(command)
+        fingerprint = command_fingerprint(command)
         return self._orders.execute_once(command_id, fingerprint, operation)
-
-
-def _fingerprint(command: object) -> str:
-    payload = {
-        "type": type(command).__name__,
-        "payload": asdict(command),
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return sha256(encoded).hexdigest()

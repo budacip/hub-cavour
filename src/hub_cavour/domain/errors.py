@@ -64,3 +64,60 @@ class VersionConflict(OrderEngineError):
 
 class IdempotencyConflict(OrderEngineError):
     pass
+
+
+class TableNotFound(OrderEngineError):
+    pass
+
+
+class TableAlreadyOccupied(OrderEngineError):
+    pass
+
+
+class TableSessionNotFound(OrderEngineError):
+    pass
+
+
+class TableSessionAlreadyExists(OrderEngineError):
+    pass
+
+
+class TableSessionVersionConflict(OrderEngineError):
+    def __init__(self, expected: int, actual: int) -> None:
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f"Table session version conflict: expected {expected}, actual {actual}"
+        )
+
+
+class InvalidTableSessionTransition(OrderEngineError):
+    pass
+
+
+class OrderNotConfirmed(OrderEngineError):
+    pass
+
+
+class OrderAlreadySubmitted(OrderEngineError):
+    pass
+
+
+class OrderNotAssignedToSession(OrderEngineError):
+    pass
+
+
+class OrderAlreadyAssigned(OrderEngineError):
+    pass
+
+
+class InvalidIdentifier(OrderEngineError):
+    pass
+
+
+class InvalidVersion(OrderEngineError):
+    pass
+
+
+class InvalidSubmissionSequence(OrderEngineError):
+    pass
