@@ -12,6 +12,9 @@ class TableRepository(Protocol):
     def get(self, table_id: str) -> Table:
         ...
 
+    def list_all(self) -> tuple[Table, ...]:
+        ...
+
 
 class TableSessionRepository(Protocol):
     def execute_once(

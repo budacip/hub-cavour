@@ -15,3 +15,6 @@ class InMemoryTableRepository:
             return self._tables[table_id]
         except KeyError as error:
             raise TableNotFound(f"Table {table_id!r} was not found") from error
+
+    def list_all(self) -> tuple[Table, ...]:
+        return tuple(self._tables.values())

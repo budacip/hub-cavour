@@ -80,3 +80,6 @@ class InMemoryCatalog:
 
     def put(self, product: CatalogProduct) -> None:
         self._products[product.id] = product
+
+    def list_all(self) -> tuple[CatalogProduct, ...]:
+        return tuple(self._products.values())
