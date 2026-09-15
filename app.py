@@ -1,5 +1,15 @@
-import streamlit as st
 import datetime
+from pathlib import Path
+import sys
+
+import streamlit as st
+
+
+SOURCE_ROOT = str(Path(__file__).resolve().parent / "src")
+if SOURCE_ROOT not in sys.path:
+    sys.path.insert(0, SOURCE_ROOT)
+
+from hub_cavour.presentation.streamlit_palmare import render_palmare_demo
 
 # Configurazione pagina
 st.set_page_config(
@@ -19,7 +29,15 @@ st.sidebar.info("Stampante Comande: Orderman ESC/POS")
 
 st.sidebar.divider()
 st.sidebar.subheader("Menu Navigazione")
-scelta = st.sidebar.radio("Vai a:", ["📊 Dashboard Comande", "📋 Menu & Listino", "🤖 Stato AI Tavoli"])
+scelta = st.sidebar.radio(
+    "Vai a:",
+    [
+        "📊 Dashboard Comande",
+        "📋 Menu & Listino",
+        "🤖 Stato AI Tavoli",
+        "📱 Palmare Demo",
+    ],
+)
 
 # Sezione 1: Dashboard Comande
 if scelta == "📊 Dashboard Comande":
@@ -73,3 +91,6 @@ elif scelta == "🤖 Stato AI Tavoli":
     st.subheader("Suggerimenti AI Più Efficaci stasera:")
     st.write("• Panna montata aggiuntiva (+€ 0,80) accettata 8 volte su 10.")
     st.write("• Abbinamento Brioche + Cappuccino consigliato con successo.")
+
+elif scelta == "📱 Palmare Demo":
+    render_palmare_demo()
